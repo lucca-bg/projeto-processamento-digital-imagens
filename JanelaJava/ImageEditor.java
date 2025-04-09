@@ -3,9 +3,11 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.util.Arrays;
+import java.util.Random;
+
 import javax.imageio.ImageIO;
 
-import java.awt.geom.AffineTransform;
 
 public class ImageEditor extends JFrame {
     private JLabel labelOriginal, labelEditada;
@@ -59,7 +61,25 @@ public class ImageEditor extends JFrame {
         
         // Menu Filtros
         JMenu menuFiltros = new JMenu("Filtros");
-        menuFiltros.add(new JMenuItem("Grayscale"));
+        JMenuItem grayscale = new JMenuItem("Grayscale");
+        JMenuItem contrasteBrilho = new JMenuItem("Contraste & Brilho");
+        JMenuItem gaussianoItem = new JMenuItem("Filtro Gaussiano");
+        JMenuItem filtroMediana = new JMenuItem("Filtro Mediana");
+
+        grayscale.addActionListener(e -> grayscale());
+        contrasteBrilho.addActionListener(e -> contrasteBrilho());
+        gaussianoItem.addActionListener(e -> filtroGaussiano());
+        filtroMediana.addActionListener(e -> filtroMediana());
+
+        JMenuItem ruidoItem = new JMenuItem("Adicionar Ruído");
+        ruidoItem.addActionListener(e -> adicionarRuido());
+        menuFiltros.add(ruidoItem);
+
+        
+        menuFiltros.add(grayscale);
+        menuFiltros.add(contrasteBrilho);
+        menuFiltros.add(gaussianoItem);
+        menuFiltros.add(filtroMediana);
         menuFiltros.add(new JMenuItem("Passa Baixa"));
         menuFiltros.add(new JMenuItem("Passa Alta"));
         menuFiltros.add(new JMenuItem("Threshold"));
@@ -340,8 +360,246 @@ public class ImageEditor extends JFrame {
         imagemEditada = imagemFinal;
         labelEditada.setIcon(new ImageIcon(imagemEditada));
     }
-    
 
+    private void grayscale(){
+
+        if (!verificaImagem()) {
+            JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+    
+        int largura = imagemEditada.getWidth();
+        int altura = imagemEditada.getHeight();
+        BufferedImage novaImagem = new BufferedImage(largura, altura, imagemEditada.getType());
+    
+        for (int x = 0; x < largura; x++) {
+            for (int y = 0; y < altura; y++) {
+
+                int p = imagemEditada.getRGB(x, y);
+
+                int a = (p >> 24) & 0xff;
+                int r = (p >> 16) & 0xff;
+                int g = (p >> 8) & 0xff;
+                int b = p & 0xff;
+     
+                // calculate average
+                int avg = (r + g + b) / 3;
+     
+                // replace RGB value with avg
+                p = (a << 24) | (avg << 16) | (avg << 8) | avg;              
+
+                novaImagem.setRGB(x, y, p);
+            }
+        }
+    
+        imagemEditada = novaImagem;
+        labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+
+
+    }
+
+    private void contrasteBrilho() {
+        if (!verificaImagem()) {
+            JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+    
+        JTextField contrasteField = new JTextField("1.0"); // valor padrão
+        JTextField brilhoField = new JTextField("0");
+        JPanel panel = new JPanel(new GridLayout(2, 2));
+        panel.add(new JLabel("Contraste (ex: 1.2):"));
+        panel.add(contrasteField);
+        panel.add(new JLabel("Brilho (ex: 20):"));
+        panel.add(brilhoField);
+    
+        int result = JOptionPane.showConfirmDialog(this, panel, "Ajustar Contraste e Brilho", JOptionPane.OK_CANCEL_OPTION);
+        if (result != JOptionPane.OK_OPTION) return;
+    
+        double contraste;
+        int brilho;
+        try {
+            contraste = Double.parseDouble(contrasteField.getText());
+            brilho = Integer.parseInt(brilhoField.getText());
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Valores inválidos!", "Erro", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+    
+        int largura = imagemEditada.getWidth();
+        int altura = imagemEditada.getHeight();
+        BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    
+        for (int y = 0; y < altura; y++) {
+            for (int x = 0; x < largura; x++) {
+                int rgb = imagemEditada.getRGB(x, y);
+    
+                int a = (rgb >> 24) & 0xff;
+                int r = (rgb >> 16) & 0xff;
+                int g = (rgb >> 8) & 0xff;
+                int b = rgb & 0xff;
+    
+                // Aplica a fórmula no intervalo de cada cor
+                r = clamp((int)(contraste * r + brilho));
+                g = clamp((int)(contraste * g + brilho));
+                b = clamp((int)(contraste * b + brilho));
+    
+                int novoRGB = (a << 24) | (r << 16) | (g << 8) | b;
+                novaImagem.setRGB(x, y, novoRGB);
+            }
+        }
+    
+        imagemEditada = novaImagem;
+        labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+    }
+    
+    private void filtroGaussiano() {
+        if (!verificaImagem()) {
+            JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+    
+        // Máscara Gaussiana 3x3 (normalizada, soma = 16)
+        int[][] kernel = {
+            {1, 2, 1},
+            {2, 4, 2},
+            {1, 2, 1}
+        };
+        int fatorDivisao = 16;
+    
+        int largura = imagemEditada.getWidth();
+        int altura = imagemEditada.getHeight();
+        BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    
+        for (int y = 1; y < altura - 1; y++) {
+            for (int x = 1; x < largura - 1; x++) {
+                int somaR = 0, somaG = 0, somaB = 0;
+    
+                for (int ky = -1; ky <= 1; ky++) {
+                    for (int kx = -1; kx <= 1; kx++) {
+                        int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                        int r = (pixel >> 16) & 0xff;
+                        int g = (pixel >> 8) & 0xff;
+                        int b = pixel & 0xff;
+    
+                        int peso = kernel[ky + 1][kx + 1];
+                        somaR += r * peso;
+                        somaG += g * peso;
+                        somaB += b * peso;
+                    }
+                }
+    
+                int novoR = clamp(somaR / fatorDivisao);
+                int novoG = clamp(somaG / fatorDivisao);
+                int novoB = clamp(somaB / fatorDivisao);
+                int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+    
+                int novoRGB = (a << 24) | (novoR << 16) | (novoG << 8) | novoB;
+                novaImagem.setRGB(x, y, novoRGB);
+            }
+        }
+    
+        imagemEditada = novaImagem;
+        labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+    }
+
+    private void filtroMediana() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, imagemEditada.getType());
+
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int[] vizinhosR = new int[9];
+            int[] vizinhosG = new int[9];
+            int[] vizinhosB = new int[9];
+            int index = 0;
+
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    vizinhosR[index] = (pixel >> 16) & 0xff;
+                    vizinhosG[index] = (pixel >> 8) & 0xff;
+                    vizinhosB[index] = pixel & 0xff;
+                    index++;
+                }
+            }
+
+            Arrays.sort(vizinhosR);
+            Arrays.sort(vizinhosG);
+            Arrays.sort(vizinhosB);
+
+            int r = vizinhosR[4]; // mediana (posição central após ordenação)
+            int g = vizinhosG[4];
+            int b = vizinhosB[4];
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+
+            int novoRGB = (a << 24) | (r << 16) | (g << 8) | b;
+            novaImagem.setRGB(x, y, novoRGB);
+        }
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+    }
+
+    
+private void adicionarRuido() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    String intensidadeStr = JOptionPane.showInputDialog(this, "Digite a intensidade do ruído (1-100%):");
+    if (intensidadeStr == null) return;
+
+    int intensidade;
+    try {
+        intensidade = Integer.parseInt(intensidadeStr);
+        if (intensidade < 1 || intensidade > 100) throw new NumberFormatException();
+    } catch (NumberFormatException e) {
+        JOptionPane.showMessageDialog(this, "Valor inválido! Digite um número entre 1 e 100.", "Erro", JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+
+    int largura = imagemOriginal.getWidth();
+    int altura = imagemOriginal.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, imagemOriginal.getType());
+
+    // Copia a imagem original
+    for (int x = 0; x < largura; x++) {
+        for (int y = 0; y < altura; y++) {
+            novaImagem.setRGB(x, y, imagemOriginal.getRGB(x, y));
+        }
+    }
+
+    // Adiciona o ruído aleatório
+    int totalPixels = largura * altura;
+    int pixelsComRuido = totalPixels * intensidade / 100;
+    Random rand = new Random();
+
+    for (int i = 0; i < pixelsComRuido; i++) {
+        int x = rand.nextInt(largura);
+        int y = rand.nextInt(altura);
+        int cor = rand.nextBoolean() ? Color.WHITE.getRGB() : Color.BLACK.getRGB();
+        novaImagem.setRGB(x, y, cor);
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+
+
+    // Garante que os valores fiquem entre 0 e 255
+    private int clamp(int valor) {
+        return Math.max(0, Math.min(255, valor));
+    }
+    
+    
     private boolean verificaImagem(){
         if(imagemEditada == null){
             return false;
