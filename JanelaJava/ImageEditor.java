@@ -27,14 +27,17 @@ public class ImageEditor extends JFrame {
         JMenuItem abrirItem = new JMenuItem("Abrir Imagem");
         JMenuItem salvarItem = new JMenuItem("Salvar Imagem");
         JMenuItem sairItem = new JMenuItem("Sair");
+        JMenuItem resetItem = new JMenuItem("Reset");
         
         abrirItem.addActionListener(e -> abrirImagem());
         salvarItem.addActionListener(e -> salvarImagem());
         sairItem.addActionListener(e -> System.exit(0));
+        resetItem.addActionListener(e -> resetImagem());
         
         menuArquivo.add(abrirItem);
         menuArquivo.add(salvarItem);
         menuArquivo.addSeparator();
+        menuArquivo.add(resetItem);
         menuArquivo.add(sairItem);
         menuBar.add(menuArquivo);
         
@@ -74,23 +77,34 @@ public class ImageEditor extends JFrame {
         JMenuItem ruidoItem = new JMenuItem("Adicionar Ruído");
         ruidoItem.addActionListener(e -> adicionarRuido());
         menuFiltros.add(ruidoItem);
-
+        JMenuItem passaAltaItem = new JMenuItem("Passa Alta");
+        passaAltaItem.addActionListener(e -> filtroPassaAlta());
+        JMenuItem thresholdItem = new JMenuItem("Threshold");
+        thresholdItem.addActionListener(e -> threshold());
         
         menuFiltros.add(grayscale);
         menuFiltros.add(contrasteBrilho);
         menuFiltros.add(gaussianoItem);
         menuFiltros.add(filtroMediana);
-        menuFiltros.add(new JMenuItem("Passa Baixa"));
-        menuFiltros.add(new JMenuItem("Passa Alta"));
-        menuFiltros.add(new JMenuItem("Threshold"));
+        menuFiltros.add(passaAltaItem);
+        menuFiltros.add(thresholdItem);
         menuBar.add(menuFiltros);
         
         // Menu Morfologia Matemática
         JMenu menuMorfologia = new JMenu("Morfologia Matemática");
-        menuMorfologia.add(new JMenuItem("Dilatação"));
-        menuMorfologia.add(new JMenuItem("Erosão"));
-        menuMorfologia.add(new JMenuItem("Abertura"));
-        menuMorfologia.add(new JMenuItem("Fechamento"));
+        JMenuItem dilatacaoItem = new JMenuItem("Dilatação");
+        dilatacaoItem.addActionListener(e -> dilatacao());
+        JMenuItem erosaoItem = new JMenuItem("Erosão");
+        erosaoItem.addActionListener(e -> erosao());
+        JMenuItem aberturaItem = new JMenuItem("Abertura");
+        aberturaItem.addActionListener(e -> abertura());
+        JMenuItem fechamentoItem = new JMenuItem("Fechamento");
+        fechamentoItem.addActionListener(e -> fechamento());
+
+        menuMorfologia.add(dilatacaoItem);
+        menuMorfologia.add(erosaoItem);
+        menuMorfologia.add(aberturaItem);
+        menuMorfologia.add(fechamentoItem);
         menuBar.add(menuMorfologia);
         
         // Menu Extração de Características
@@ -610,4 +624,280 @@ private void adicionarRuido() {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new ImageEditor().setVisible(true));
     }
+private void filtroPassaAlta() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    // Máscara passa-alta clássica 3x3
+    int[][] kernel = {
+        { -1, -1, -1 },
+        { -1,  8, -1 },
+        { -1, -1, -1 }
+    };
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int somaR = 0, somaG = 0, somaB = 0;
+
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+
+                    int peso = kernel[ky + 1][kx + 1];
+                    somaR += r * peso;
+                    somaG += g * peso;
+                    somaB += b * peso;
+                }
+            }
+
+            int novoR = clamp(somaR);
+            int novoG = clamp(somaG);
+            int novoB = clamp(somaB);
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+
+            int novoRGB = (a << 24) | (novoR << 16) | (novoG << 8) | novoB;
+            novaImagem.setRGB(x, y, novoRGB);
+        }
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void threshold() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    String limiarStr = JOptionPane.showInputDialog(this, "Digite o valor do limiar (0-255):", "128");
+    if (limiarStr == null) return;
+
+    int limiar;
+    try {
+        limiar = Integer.parseInt(limiarStr);
+        if (limiar < 0 || limiar > 255) throw new NumberFormatException();
+    } catch (NumberFormatException e) {
+        JOptionPane.showMessageDialog(this, "Valor inválido!", "Erro", JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+
+    for (int y = 0; y < altura; y++) {
+        for (int x = 0; x < largura; x++) {
+            int pixel = imagemEditada.getRGB(x, y);
+            int a = (pixel >> 24) & 0xff;
+            int r = (pixel >> 16) & 0xff;
+            int g = (pixel >> 8) & 0xff;
+            int b = pixel & 0xff;
+            // Calcula o valor de cinza
+            int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+            int bin = (gray >= limiar) ? 255 : 0;
+            int novoPixel = (a << 24) | (bin << 16) | (bin << 8) | bin;
+            novaImagem.setRGB(x, y, novoPixel);
+        }
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void dilatacao() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+
+    // Estruturante 3x3
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int max = 0;
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray > max) max = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (max << 16) | (max << 8) | max;
+            novaImagem.setRGB(x, y, novoPixel);
+        }
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void erosao() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+    BufferedImage novaImagem = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+
+    // Estruturante 3x3
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int min = 255;
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray < min) min = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (min << 16) | (min << 8) | min;
+            novaImagem.setRGB(x, y, novoPixel);
+        }
+    }
+
+    imagemEditada = novaImagem;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void abertura() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+
+    // --- Erosão ---
+    BufferedImage imagemErodida = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int min = 255;
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray < min) min = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (min << 16) | (min << 8) | min;
+            imagemErodida.setRGB(x, y, novoPixel);
+        }
+    }
+
+    // --- Dilatação ---
+    BufferedImage imagemAberta = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int max = 0;
+            int a = (imagemErodida.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemErodida.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray > max) max = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (max << 16) | (max << 8) | max;
+            imagemAberta.setRGB(x, y, novoPixel);
+        }
+    }
+
+    imagemEditada = imagemAberta;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void fechamento() {
+    if (!verificaImagem()) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+
+    int largura = imagemEditada.getWidth();
+    int altura = imagemEditada.getHeight();
+
+    // --- Dilatação ---
+    BufferedImage imagemDilatada = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int max = 0;
+            int a = (imagemEditada.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemEditada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray > max) max = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (max << 16) | (max << 8) | max;
+            imagemDilatada.setRGB(x, y, novoPixel);
+        }
+    }
+
+    // --- Erosão ---
+    BufferedImage imagemFechada = new BufferedImage(largura, altura, BufferedImage.TYPE_INT_ARGB);
+    for (int y = 1; y < altura - 1; y++) {
+        for (int x = 1; x < largura - 1; x++) {
+            int min = 255;
+            int a = (imagemDilatada.getRGB(x, y) >> 24) & 0xff;
+            for (int ky = -1; ky <= 1; ky++) {
+                for (int kx = -1; kx <= 1; kx++) {
+                    int pixel = imagemDilatada.getRGB(x + kx, y + ky);
+                    int r = (pixel >> 16) & 0xff;
+                    int g = (pixel >> 8) & 0xff;
+                    int b = pixel & 0xff;
+                    int gray = (int)(0.299 * r + 0.587 * g + 0.114 * b);
+                    if (gray < min) min = gray;
+                }
+            }
+            int novoPixel = (a << 24) | (min << 16) | (min << 8) | min;
+            imagemFechada.setRGB(x, y, novoPixel);
+        }
+    }
+
+    imagemEditada = imagemFechada;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
+private void resetImagem() {
+    if (imagemOriginal == null) {
+        JOptionPane.showMessageDialog(this, "Nenhuma imagem original carregada!", "Aviso", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+    int largura = imagemOriginal.getWidth();
+    int altura = imagemOriginal.getHeight();
+    BufferedImage copia = new BufferedImage(largura, altura, imagemOriginal.getType());
+    Graphics g = copia.getGraphics();
+    g.drawImage(imagemOriginal, 0, 0, null);
+    g.dispose();
+    imagemEditada = copia;
+    labelEditada.setIcon(new ImageIcon(imagemEditada.getScaledInstance(300, 300, Image.SCALE_SMOOTH)));
+}
 }
